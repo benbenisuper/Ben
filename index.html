@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HTML File Editor</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1f2937; background: #f3f4f6; }
+  body { display: flex; flex-direction: column; }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px; background: #1f2937; color: #f9fafb;
+    border-bottom: 1px solid #111827;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header .spacer { flex: 1; }
+  header .filename { font-size: 13px; color: #d1d5db; font-family: ui-monospace, monospace; }
+
+  button, label.btn {
+    background: #2563eb; color: white; border: none; padding: 8px 14px;
+    border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  button:hover, label.btn:hover { background: #1d4ed8; }
+  button:disabled { background: #6b7280; cursor: not-allowed; }
+  button.secondary { background: #4b5563; }
+  button.secondary:hover { background: #374151; }
+  button.danger { background: #dc2626; }
+  button.danger:hover { background: #b91c1c; }
+  input[type="file"] { display: none; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  #canvas-wrap {
+    flex: 1; padding: 16px; display: flex; align-items: stretch; justify-content: stretch;
+    background: #e5e7eb;
+  }
+  #canvas {
+    flex: 1; background: white; border: 1px solid #d1d5db; border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05); overflow: hidden;
+  }
+  #placeholder {
+    width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+    color: #6b7280; font-size: 15px; flex-direction: column; gap: 12px; text-align: center; padding: 24px;
+  }
+  #placeholder svg { width: 48px; height: 48px; opacity: 0.5; }
+  iframe { width: 100%; height: 100%; border: none; display: block; background: white; }
+
+  aside {
+    width: 320px; background: white; border-left: 1px solid #e5e7eb;
+    overflow-y: auto; padding: 16px;
+  }
+  aside h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin: 0 0 12px; }
+  aside .empty { color: #9ca3af; font-size: 14px; line-height: 1.5; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px; }
+  .field input[type="text"], .field input[type="url"], .field input[type="number"], .field textarea {
+    width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px;
+    font-size: 13px; font-family: inherit;
+  }
+  .field textarea { min-height: 70px; resize: vertical; }
+  .field input[type="color"] { width: 100%; height: 32px; padding: 2px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; background: white; }
+  .field .row { display: flex; gap: 8px; align-items: center; }
+  .field .row input[type="color"] { flex: 1; }
+  .field .row button { padding: 6px 10px; font-size: 12px; }
+  .tag {
+    display: inline-block; background: #ede9fe; color: #6d28d9;
+    padding: 2px 8px; border-radius: 4px; font-family: ui-monospace, monospace;
+    font-size: 12px; font-weight: 600;
+  }
+  .selected-info { padding: 10px; background: #f9fafb; border-radius: 6px; margin-bottom: 16px; font-size: 13px; }
+  .selected-info .path { color: #6b7280; font-size: 11px; font-family: ui-monospace, monospace; margin-top: 4px; word-break: break-all; }
+  hr { border: none; border-top: 1px solid #e5e7eb; margin: 16px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>HTML Editor</h1>
+  <label class="btn" for="file-input">Upload HTML</label>
+  <input type="file" id="file-input" accept=".html,.htm,text/html">
+  <button id="download-btn" class="secondary" disabled>Download</button>
+  <span class="spacer"></span>
+  <span class="filename" id="filename-label">No file loaded</span>
+</header>
+
+<main>
+  <div id="canvas-wrap">
+    <div id="canvas">
+      <div id="placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+        <div>Upload an HTML file to start editing.<br><span style="font-size:13px">Click any element on the page to edit it.</span></div>
+      </div>
+    </div>
+  </div>
+  <aside>
+    <h2>Properties</h2>
+    <div id="sidebar"><p class="empty">Click an element on the page to edit it.</p></div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const state = {
+    doc: null,
+    filename: 'edited.html',
+    selectedId: null,
+    nextId: 1,
+  };
+
+  const fileInput = document.getElementById('file-input');
+  const downloadBtn = document.getElementById('download-btn');
+  const filenameLabel = document.getElementById('filename-label');
+  const canvas = document.getElementById('canvas');
+  const sidebar = document.getElementById('sidebar');
+
+  // ===== Upload =====
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => loadHtml(String(reader.result), file.name);
+    reader.readAsText(file);
+    fileInput.value = '';
+  });
+
+  function loadHtml(text, name) {
+    state.filename = name || 'edited.html';
+    state.doc = new DOMParser().parseFromString(text, 'text/html');
+    state.selectedId = null;
+    state.nextId = 1;
+    state.doc.querySelectorAll('*').forEach(el => {
+      el.setAttribute('data-editor-id', String(state.nextId++));
+    });
+    filenameLabel.textContent = state.filename;
+    downloadBtn.disabled = false;
+    renderIframe();
+    renderSidebar();
+  }
+
+  // ===== Render iframe =====
+  function renderIframe() {
+    canvas.innerHTML = '';
+    const iframe = document.createElement('iframe');
+    iframe.id = 'preview';
+    canvas.appendChild(iframe);
+
+    const clone = state.doc.cloneNode(true);
+    clone.querySelectorAll('script').forEach(s => s.remove());
+
+    // Outline styles
+    const style = clone.createElement('style');
+    style.setAttribute('data-editor-injected', '');
+    style.textContent = `
+      [data-editor-hover] { outline: 2px dashed #3b82f6 !important; outline-offset: -2px !important; cursor: pointer !important; }
+      [data-editor-selected] { outline: 2px solid #ef4444 !important; outline-offset: -2px !important; }
+      html, body { cursor: default; }
+    `;
+    (clone.head || clone.documentElement).appendChild(style);
+
+    // Click + hover handler
+    const script = clone.createElement('script');
+    script.setAttribute('data-editor-injected', '');
+    script.textContent = `
+      (function() {
+        let hoverEl = null;
+        document.addEventListener('mouseover', function(e) {
+          if (hoverEl && hoverEl !== e.target) hoverEl.removeAttribute('data-editor-hover');
+          if (e.target === document.documentElement || e.target === document.body) return;
+          hoverEl = e.target;
+          hoverEl.setAttribute('data-editor-hover', '');
+        }, true);
+        document.addEventListener('mouseout', function() {
+          if (hoverEl) { hoverEl.removeAttribute('data-editor-hover'); hoverEl = null; }
+        }, true);
+        document.addEventListener('click', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          const id = e.target.getAttribute('data-editor-id');
+          if (id) parent.postMessage({ type: 'editor:select', id: id }, '*');
+        }, true);
+        document.addEventListener('submit', function(e) { e.preventDefault(); }, true);
+      })();
+    `;
+    (clone.body || clone.documentElement).appendChild(script);
+
+    const html = '<!DOCTYPE html>\n' + clone.documentElement.outerHTML;
+    iframe.srcdoc = html;
+
+    iframe.addEventListener('load', () => {
+      highlightSelected();
+    });
+  }
+
+  // ===== Selection =====
+  window.addEventListener('message', (e) => {
+    if (e.data?.type === 'editor:select') {
+      state.selectedId = e.data.id;
+      highlightSelected();
+      renderSidebar();
+    }
+  });
+
+  function getIframeDoc() {
+    return document.getElementById('preview')?.contentDocument || null;
+  }
+
+  function highlightSelected() {
+    const idoc = getIframeDoc();
+    if (!idoc) return;
+    idoc.querySelectorAll('[data-editor-selected]').forEach(el => el.removeAttribute('data-editor-selected'));
+    if (state.selectedId) {
+      const el = idoc.querySelector('[data-editor-id="' + cssEscape(state.selectedId) + '"]');
+      if (el) el.setAttribute('data-editor-selected', '');
+    }
+  }
+
+  function getSelected() {
+    if (!state.selectedId) return { docEl: null, iframeEl: null };
+    const sel = '[data-editor-id="' + cssEscape(state.selectedId) + '"]';
+    return {
+      docEl: state.doc?.querySelector(sel) || null,
+      iframeEl: getIframeDoc()?.querySelector(sel) || null,
+    };
+  }
+
+  function cssEscape(v) {
+    return String(v).replace(/["\\]/g, '\\$&');
+  }
+
+  // ===== Sidebar =====
+  function renderSidebar() {
+    const { docEl, iframeEl } = getSelected();
+    if (!docEl) {
+      sidebar.innerHTML = state.doc
+        ? '<p class="empty">Click an element on the page to edit it.</p>'
+        : '<p class="empty">Upload a file to begin.</p>';
+      return;
+    }
+
+    const tag = docEl.tagName.toLowerCase();
+    const hasChildElements = docEl.children.length > 0;
+    const computed = iframeEl ? iframeEl.ownerDocument.defaultView.getComputedStyle(iframeEl) : null;
+
+    const info = document.createElement('div');
+    info.className = 'selected-info';
+    info.innerHTML = '<span class="tag">&lt;' + tag + '&gt;</span>' +
+      '<div class="path">' + describePath(docEl) + '</div>';
+
+    sidebar.innerHTML = '';
+    sidebar.appendChild(info);
+
+    // Text content (only when no nested elements, to avoid wiping structure)
+    if (!hasChildElements) {
+      addTextField(sidebar, 'Text', docEl.textContent || '', (v) => {
+        applyToBoth((el) => { el.textContent = v; });
+      });
+    } else {
+      const note = document.createElement('p');
+      note.className = 'empty';
+      note.style.fontSize = '12px';
+      note.style.marginTop = '0';
+      note.style.marginBottom = '14px';
+      note.textContent = 'This element contains other elements. Click a child to edit its text directly.';
+      sidebar.appendChild(note);
+    }
+
+    // Image src
+    if (tag === 'img') {
+      addInputField(sidebar, 'Image URL', 'url', docEl.getAttribute('src') || '', (v) => {
+        applyToBoth((el) => { el.setAttribute('src', v); });
+      });
+      addInputField(sidebar, 'Alt text', 'text', docEl.getAttribute('alt') || '', (v) => {
+        applyToBoth((el) => { el.setAttribute('alt', v); });
+      });
+    }
+
+    // Link href
+    if (tag === 'a') {
+      addInputField(sidebar, 'Link URL', 'url', docEl.getAttribute('href') || '', (v) => {
+        applyToBoth((el) => { el.setAttribute('href', v); });
+      });
+    }
+
+    // Colors
+    const textColor = readColor(docEl, computed, 'color') || '#000000';
+    addColorField(sidebar, 'Text color', textColor, (v) => {
+      applyToBoth((el) => { el.style.color = v; });
+    }, () => {
+      applyToBoth((el) => { el.style.removeProperty('color'); });
+      renderSidebar();
+    });
+
+    const bgColor = readColor(docEl, computed, 'background-color') || '#ffffff';
+    addColorField(sidebar, 'Background color', bgColor, (v) => {
+      applyToBoth((el) => { el.style.backgroundColor = v; });
+    }, () => {
+      applyToBoth((el) => { el.style.removeProperty('background-color'); });
+      renderSidebar();
+    });
+
+    // Font size
+    const fontSize = readNumber(docEl.style.fontSize) ?? (computed ? readNumber(computed.fontSize) : null);
+    addInputField(sidebar, 'Font size (px)', 'number', fontSize ?? '', (v) => {
+      applyToBoth((el) => {
+        if (v === '' || v == null) el.style.removeProperty('font-size');
+        else el.style.fontSize = Number(v) + 'px';
+      });
+    });
+
+    // Divider + Delete
+    const hr = document.createElement('hr');
+    sidebar.appendChild(hr);
+    const delBtn = document.createElement('button');
+    delBtn.className = 'danger';
+    delBtn.textContent = 'Delete element';
+    delBtn.style.width = '100%';
+    delBtn.addEventListener('click', () => {
+      if (!confirm('Delete this <' + tag + '> element?')) return;
+      applyToBoth((el) => el.remove());
+      state.selectedId = null;
+      renderSidebar();
+    });
+    sidebar.appendChild(delBtn);
+  }
+
+  function applyToBoth(fn) {
+    const { docEl, iframeEl } = getSelected();
+    if (docEl) fn(docEl);
+    if (iframeEl) fn(iframeEl);
+  }
+
+  function addTextField(parent, label, value, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'field';
+    wrap.innerHTML = '<label>' + label + '</label>';
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.addEventListener('input', () => onChange(ta.value));
+    wrap.appendChild(ta);
+    parent.appendChild(wrap);
+  }
+
+  function addInputField(parent, label, type, value, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'field';
+    wrap.innerHTML = '<label>' + label + '</label>';
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = value;
+    input.addEventListener('input', () => onChange(input.value));
+    wrap.appendChild(input);
+    parent.appendChild(wrap);
+  }
+
+  function addColorField(parent, label, value, onChange, onClear) {
+    const wrap = document.createElement('div');
+    wrap.className = 'field';
+    wrap.innerHTML = '<label>' + label + '</label>';
+    const row = document.createElement('div');
+    row.className = 'row';
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = value;
+    input.addEventListener('input', () => onChange(input.value));
+    row.appendChild(input);
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'secondary';
+    clearBtn.type = 'button';
+    clearBtn.textContent = 'Clear';
+    clearBtn.addEventListener('click', onClear);
+    row.appendChild(clearBtn);
+    wrap.appendChild(row);
+    parent.appendChild(wrap);
+  }
+
+  function readColor(docEl, computed, prop) {
+    const inline = docEl.style.getPropertyValue(prop);
+    const raw = inline || (computed ? computed.getPropertyValue(prop) : '');
+    return rgbToHex(raw);
+  }
+
+  function rgbToHex(value) {
+    if (!value) return null;
+    value = value.trim();
+    if (value.startsWith('#')) {
+      if (value.length === 4) return '#' + value.slice(1).split('').map(c => c + c).join('');
+      return value.toLowerCase();
+    }
+    const m = value.match(/rgba?\(([^)]+)\)/i);
+    if (!m) return null;
+    const parts = m[1].split(',').map(s => s.trim());
+    if (parts.length < 3) return null;
+    const a = parts[3] !== undefined ? parseFloat(parts[3]) : 1;
+    if (a === 0) return null;
+    return '#' + parts.slice(0, 3).map(p => {
+      const n = Math.max(0, Math.min(255, parseInt(p, 10) || 0));
+      return n.toString(16).padStart(2, '0');
+    }).join('');
+  }
+
+  function readNumber(s) {
+    if (!s) return null;
+    const m = String(s).match(/-?\d+(\.\d+)?/);
+    return m ? parseFloat(m[0]) : null;
+  }
+
+  function describePath(el) {
+    const parts = [];
+    let cur = el;
+    while (cur && cur.nodeType === 1 && cur.tagName.toLowerCase() !== 'html') {
+      let s = cur.tagName.toLowerCase();
+      if (cur.id) s += '#' + cur.id;
+      else if (cur.classList.length) s += '.' + Array.from(cur.classList).join('.');
+      parts.unshift(s);
+      cur = cur.parentElement;
+      if (parts.length >= 5) { parts.unshift('…'); break; }
+    }
+    return parts.join(' › ');
+  }
+
+  // ===== Download =====
+  downloadBtn.addEventListener('click', () => {
+    if (!state.doc) return;
+    const clone = state.doc.cloneNode(true);
+    clone.querySelectorAll('[data-editor-id]').forEach(el => el.removeAttribute('data-editor-id'));
+    clone.querySelectorAll('[data-editor-hover]').forEach(el => el.removeAttribute('data-editor-hover'));
+    clone.querySelectorAll('[data-editor-selected]').forEach(el => el.removeAttribute('data-editor-selected'));
+    clone.querySelectorAll('[data-editor-injected]').forEach(el => el.remove());
+
+    const html = '<!DOCTYPE html>\n' + clone.documentElement.outerHTML;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = state.filename || 'edited.html';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+})();
+</script>
+</body>
+</html>
