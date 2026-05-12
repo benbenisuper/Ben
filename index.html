@@ -233,6 +233,8 @@
     style.textContent = `
       [data-editor-hover] { outline: 2px dashed #3b82f6 !important; outline-offset: -2px !important; cursor: pointer !important; }
       [data-editor-selected] { outline: 2px solid #ef4444 !important; outline-offset: -2px !important; }
+      [contenteditable="true"][data-editor-selected] { outline-color: #10b981 !important; cursor: text !important; }
+      [contenteditable="true"] { caret-color: #10b981; }
       html, body { cursor: default; }
     `;
     (clone.head || clone.documentElement).appendChild(style);
@@ -243,9 +245,24 @@
     script.textContent = `
       (function() {
         let hoverEl = null;
+        function inSelectedEditable(node) {
+          while (node && node.nodeType === 1) {
+            if (node.hasAttribute('data-editor-selected') && node.getAttribute('contenteditable') === 'true') return node;
+            node = node.parentElement;
+          }
+          return null;
+        }
+        function findEditableAncestor(node) {
+          while (node) {
+            if (node.nodeType === 1 && node.getAttribute && node.getAttribute('contenteditable') === 'true') return node;
+            node = node.parentNode;
+          }
+          return null;
+        }
         document.addEventListener('mouseover', function(e) {
           if (hoverEl && hoverEl !== e.target) hoverEl.removeAttribute('data-editor-hover');
           if (e.target === document.documentElement || e.target === document.body) return;
+          if (inSelectedEditable(e.target)) return;
           hoverEl = e.target;
           hoverEl.setAttribute('data-editor-hover', '');
         }, true);
@@ -253,10 +270,33 @@
           if (hoverEl) { hoverEl.removeAttribute('data-editor-hover'); hoverEl = null; }
         }, true);
         document.addEventListener('click', function(e) {
+          // Inside the currently selected editable element: let the browser place the caret naturally
+          if (inSelectedEditable(e.target)) return;
           e.preventDefault();
           e.stopPropagation();
-          const id = e.target.getAttribute('data-editor-id');
-          if (id) parent.postMessage({ type: 'editor:select', id: id }, '*');
+          const id = e.target.getAttribute && e.target.getAttribute('data-editor-id');
+          if (id) parent.postMessage({ type: 'editor:select', id: id, x: e.clientX, y: e.clientY }, '*');
+        }, true);
+        document.addEventListener('input', function(e) {
+          const target = findEditableAncestor(e.target);
+          if (!target) return;
+          const id = target.getAttribute('data-editor-id');
+          if (!id) return;
+          parent.postMessage({ type: 'editor:edit', id: id, html: target.innerHTML }, '*');
+        }, true);
+        document.addEventListener('keydown', function(e) {
+          if (e.key !== 'Enter' || e.shiftKey) return;
+          const target = findEditableAncestor(e.target);
+          if (!target) return;
+          e.preventDefault();
+          document.execCommand('insertLineBreak');
+        }, true);
+        document.addEventListener('paste', function(e) {
+          const target = findEditableAncestor(e.target);
+          if (!target) return;
+          e.preventDefault();
+          const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+          document.execCommand('insertText', false, text);
         }, true);
         document.addEventListener('submit', function(e) { e.preventDefault(); }, true);
       })();
@@ -275,10 +315,57 @@
   window.addEventListener('message', (e) => {
     if (e.data?.type === 'editor:select') {
       state.selectedId = e.data.id;
+      state.pendingCaret = (typeof e.data.x === 'number') ? { x: e.data.x, y: e.data.y } : null;
       highlightSelected();
       renderSidebar();
+    } else if (e.data?.type === 'editor:edit') {
+      handleInlineEdit(e.data.id, e.data.html);
     }
   });
+
+  function handleInlineEdit(id, html) {
+    if (!state.doc) return;
+    const docEl = state.doc.querySelector('[data-editor-id="' + cssEscape(id) + '"]');
+    if (!docEl) return;
+    docEl.innerHTML = html;
+    // Keep the sidebar textarea in sync (without stealing focus from the iframe)
+    const ta = sidebar.querySelector('textarea');
+    if (ta && document.activeElement !== ta) {
+      const newText = getEditableText(docEl);
+      if (ta.value !== newText) ta.value = newText;
+    }
+  }
+
+  // Tags that don't make sense to type into.
+  const NON_TEXT_TAGS = new Set(['img','video','audio','canvas','iframe','embed','object','br','hr','input','textarea','select','button','html','body','head','script','style','meta','link','title']);
+  function isTextEditableTag(tag) {
+    return !NON_TEXT_TAGS.has(String(tag || '').toLowerCase());
+  }
+
+  function focusEditableAt(el, point) {
+    const idoc = el.ownerDocument;
+    const iwin = idoc.defaultView;
+    el.focus();
+    let range = null;
+    if (point && idoc.caretRangeFromPoint) {
+      range = idoc.caretRangeFromPoint(point.x, point.y);
+    } else if (point && idoc.caretPositionFromPoint) {
+      const pos = idoc.caretPositionFromPoint(point.x, point.y);
+      if (pos) {
+        range = idoc.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+        range.collapse(true);
+      }
+    }
+    if (!range || !el.contains(range.startContainer)) {
+      range = idoc.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+    }
+    const sel = iwin.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
 
   function getIframeDoc() {
     return document.getElementById('preview')?.contentDocument || null;
@@ -287,11 +374,18 @@
   function highlightSelected() {
     const idoc = getIframeDoc();
     if (!idoc) return;
+    // Clear all previous selection + editable state
     idoc.querySelectorAll('[data-editor-selected]').forEach(el => el.removeAttribute('data-editor-selected'));
-    if (state.selectedId) {
-      const el = idoc.querySelector('[data-editor-id="' + cssEscape(state.selectedId) + '"]');
-      if (el) el.setAttribute('data-editor-selected', '');
+    idoc.querySelectorAll('[contenteditable="true"]').forEach(el => el.removeAttribute('contenteditable'));
+    if (!state.selectedId) return;
+    const el = idoc.querySelector('[data-editor-id="' + cssEscape(state.selectedId) + '"]');
+    if (!el) return;
+    el.setAttribute('data-editor-selected', '');
+    if (isTextEditableTag(el.tagName)) {
+      el.setAttribute('contenteditable', 'true');
+      focusEditableAt(el, state.pendingCaret);
     }
+    state.pendingCaret = null;
   }
 
   function getSelected() {
@@ -823,6 +917,7 @@
     clone.querySelectorAll('[data-editor-id]').forEach(el => el.removeAttribute('data-editor-id'));
     clone.querySelectorAll('[data-editor-hover]').forEach(el => el.removeAttribute('data-editor-hover'));
     clone.querySelectorAll('[data-editor-selected]').forEach(el => el.removeAttribute('data-editor-selected'));
+    clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
     clone.querySelectorAll('[data-editor-injected]').forEach(el => el.remove());
 
     const html = '<!DOCTYPE html>\n' + clone.documentElement.outerHTML;
