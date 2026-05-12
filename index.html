@@ -83,6 +83,38 @@
   .child-pick-item .preview { color: #6b7280; margin-left: 6px; }
   .warn { background: #fef3c7; border: 1px solid #fcd34d; color: #78350f; padding: 8px 10px; border-radius: 4px; font-size: 12px; line-height: 1.4; margin: -6px 0 14px; }
   hr { border: none; border-top: 1px solid #e5e7eb; margin: 16px 0; }
+
+  .modal { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal[hidden] { display: none; }
+  .modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.55); }
+  .modal-content { position: relative; background: white; border-radius: 8px; max-width: 640px; width: 100%; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+  .modal-header { display: flex; align-items: center; padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+  .modal-header h2 { margin: 0; flex: 1; font-size: 16px; color: #1f2937; }
+  .modal-close { background: transparent; color: #6b7280; font-size: 22px; line-height: 1; padding: 4px 10px; }
+  .modal-close:hover { background: #f3f4f6; color: #1f2937; }
+  .modal-body { padding: 16px 20px; overflow-y: auto; }
+  .save-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .save-row input { flex: 1; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; font-family: inherit; }
+  .save-row button { white-space: nowrap; }
+  #versions-list { display: flex; flex-direction: column; gap: 8px; }
+  #versions-list .empty { text-align: center; color: #9ca3af; padding: 24px 0; }
+  .version-item { padding: 12px; border: 1px solid #e5e7eb; border-radius: 6px; background: #fafafa; }
+  .version-item .v-header { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .version-item .v-name { font-weight: 600; color: #1f2937; }
+  .version-item .v-meta { color: #6b7280; font-size: 12px; }
+  .version-item .v-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .version-item .v-actions button { padding: 4px 10px; font-size: 12px; }
+  .version-changes { margin-top: 10px; padding: 10px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 12px; max-height: 260px; overflow-y: auto; }
+  .version-changes .empty { color: #6b7280; text-align: left; padding: 0; }
+  .change-entry { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
+  .change-entry:last-child { border-bottom: none; }
+  .change-entry .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; margin-right: 6px; vertical-align: middle; }
+  .change-entry .badge.added { background: #d1fae5; color: #065f46; }
+  .change-entry .badge.removed { background: #fee2e2; color: #991b1b; }
+  .change-entry .badge.changed { background: #fef3c7; color: #92400e; }
+  .change-entry .badge.styled { background: #dbeafe; color: #1e40af; }
+  .change-entry .text-old { display: block; color: #991b1b; text-decoration: line-through; margin-top: 4px; padding-left: 8px; border-left: 2px solid #fecaca; }
+  .change-entry .text-new { display: block; color: #065f46; margin-top: 2px; padding-left: 8px; border-left: 2px solid #a7f3d0; }
 </style>
 </head>
 <body>
@@ -91,10 +123,28 @@
   <h1>HTML Editor</h1>
   <label class="btn" for="file-input">Upload HTML</label>
   <input type="file" id="file-input" accept=".html,.htm,text/html">
+  <button id="versions-btn" class="secondary" disabled>Versions</button>
   <button id="download-btn" class="secondary" disabled>Download</button>
   <span class="spacer"></span>
   <span class="filename" id="filename-label">No file loaded</span>
 </header>
+
+<div id="versions-modal" class="modal" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Versions</h2>
+      <button class="modal-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="save-row">
+        <input type="text" id="version-name-input" placeholder="Optional name (e.g. 'before colour changes')">
+        <button id="save-version-btn" type="button">Save current</button>
+      </div>
+      <div id="versions-list"></div>
+    </div>
+  </div>
+</div>
 
 <main>
   <div id="canvas-wrap">
@@ -124,9 +174,13 @@
 
   const fileInput = document.getElementById('file-input');
   const downloadBtn = document.getElementById('download-btn');
+  const versionsBtn = document.getElementById('versions-btn');
   const filenameLabel = document.getElementById('filename-label');
   const canvas = document.getElementById('canvas');
   const sidebar = document.getElementById('sidebar');
+  const versionsModal = document.getElementById('versions-modal');
+  const versionsList = document.getElementById('versions-list');
+  const versionNameInput = document.getElementById('version-name-input');
 
   // ===== Upload =====
   document.getElementById('placeholder').addEventListener('click', () => fileInput.click());
@@ -144,12 +198,21 @@
     state.filename = name || 'edited.html';
     state.doc = new DOMParser().parseFromString(text, 'text/html');
     state.selectedId = null;
-    state.nextId = 1;
+    // Preserve existing data-editor-ids if present (lets snapshots diff correctly across reloads).
+    let maxId = 0;
+    state.doc.querySelectorAll('[data-editor-id]').forEach(el => {
+      const n = parseInt(el.getAttribute('data-editor-id'), 10);
+      if (Number.isFinite(n) && n > maxId) maxId = n;
+    });
+    state.nextId = maxId + 1;
     state.doc.querySelectorAll('*').forEach(el => {
-      el.setAttribute('data-editor-id', String(state.nextId++));
+      if (!el.hasAttribute('data-editor-id')) {
+        el.setAttribute('data-editor-id', String(state.nextId++));
+      }
     });
     filenameLabel.textContent = state.filename;
     downloadBtn.disabled = false;
+    versionsBtn.disabled = false;
     renderIframe();
     renderSidebar();
   }
@@ -255,7 +318,7 @@
     }
 
     const tag = docEl.tagName.toLowerCase();
-    const hasChildElements = docEl.children.length > 0;
+    const hasChildElements = Array.from(docEl.children).some(c => c.tagName !== 'BR');
     const computed = iframeEl ? iframeEl.ownerDocument.defaultView.getComputedStyle(iframeEl) : null;
 
     const info = document.createElement('div');
@@ -269,9 +332,9 @@
     // Navigation: parent + children buttons (helpful when click can't reach an element)
     addNavigation(sidebar, docEl);
 
-    // Text content — always editable. Warn if it'd replace nested elements.
-    addTextField(sidebar, 'Text', docEl.textContent || '', (v) => {
-      applyToBoth((el) => { el.textContent = v; });
+    // Text content — always editable. Newlines preserved as <br>. Warn if it'd replace nested elements.
+    addTextField(sidebar, 'Text', getEditableText(docEl), (v) => {
+      applyToBoth((el) => { setEditableText(el, v); });
     });
     if (hasChildElements) {
       const warn = document.createElement('p');
@@ -343,6 +406,28 @@
     const { docEl, iframeEl } = getSelected();
     if (docEl) fn(docEl);
     if (iframeEl) fn(iframeEl);
+  }
+
+  // Read text from an element, converting <br> back to newlines so the textarea shows them.
+  function getEditableText(el) {
+    let out = '';
+    el.childNodes.forEach(n => {
+      if (n.nodeType === 3) out += n.nodeValue;
+      else if (n.nodeType === 1 && n.tagName === 'BR') out += '\n';
+      else if (n.nodeType === 1) out += n.textContent || '';
+    });
+    return out;
+  }
+
+  // Write text into an element, splitting on \n and inserting real <br> tags between lines.
+  function setEditableText(el, text) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    const doc = el.ownerDocument;
+    const lines = String(text).split('\n');
+    lines.forEach((line, i) => {
+      if (i > 0) el.appendChild(doc.createElement('br'));
+      if (line) el.appendChild(doc.createTextNode(line));
+    });
   }
 
   function addTextField(parent, label, value, onChange) {
@@ -496,6 +581,240 @@
     }
     return parts.join(' › ');
   }
+
+  // ===== Versions (localStorage) =====
+  const VERSIONS_KEY = 'html-editor-versions-v1';
+  const MAX_VERSIONS = 50;
+
+  function loadVersions() {
+    try { return JSON.parse(localStorage.getItem(VERSIONS_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function persistVersions(versions) {
+    try { localStorage.setItem(VERSIONS_KEY, JSON.stringify(versions)); }
+    catch (e) { alert('Could not save version — browser storage is full or blocked.'); }
+  }
+  function serializeCurrent() {
+    if (!state.doc) return null;
+    return '<!DOCTYPE html>\n' + state.doc.documentElement.outerHTML;
+  }
+  function snapshotCurrent(name) {
+    const html = serializeCurrent();
+    if (!html) return;
+    const v = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: (name || '').trim() || ('Saved ' + new Date().toLocaleString()),
+      filename: state.filename,
+      timestamp: Date.now(),
+      html,
+    };
+    const versions = loadVersions();
+    versions.unshift(v);
+    if (versions.length > MAX_VERSIONS) versions.length = MAX_VERSIONS;
+    persistVersions(versions);
+    return v;
+  }
+  function deleteVersion(id) {
+    persistVersions(loadVersions().filter(v => v.id !== id));
+  }
+  function restoreVersion(id) {
+    const v = loadVersions().find(x => x.id === id);
+    if (!v) return;
+    if (!confirm('Replace your current edits with "' + v.name + '"? Save the current state first if you want to keep it.')) return;
+    loadHtml(v.html, v.filename);
+    closeVersionsModal();
+  }
+
+  // Compare a saved version against the current state. Walk both by data-editor-id.
+  function compareToVersion(versionHtml) {
+    const otherDoc = new DOMParser().parseFromString(versionHtml, 'text/html');
+    const otherMap = new Map();
+    otherDoc.querySelectorAll('[data-editor-id]').forEach(el => otherMap.set(el.getAttribute('data-editor-id'), el));
+    const currentMap = new Map();
+    state.doc.querySelectorAll('[data-editor-id]').forEach(el => currentMap.set(el.getAttribute('data-editor-id'), el));
+
+    const changes = [];
+    for (const [id, otherEl] of otherMap) {
+      const cur = currentMap.get(id);
+      if (!cur) {
+        changes.push({ kind: 'removed', tag: otherEl.tagName.toLowerCase(), oldText: (otherEl.textContent || '').trim() });
+        continue;
+      }
+      const oldText = (otherEl.textContent || '').trim();
+      const newText = (cur.textContent || '').trim();
+      if (oldText !== newText) {
+        changes.push({ kind: 'changed', tag: cur.tagName.toLowerCase(), oldText, newText });
+      } else if ((otherEl.getAttribute('style') || '') !== (cur.getAttribute('style') || '') ||
+                 (otherEl.getAttribute('src') || '') !== (cur.getAttribute('src') || '') ||
+                 (otherEl.getAttribute('href') || '') !== (cur.getAttribute('href') || '')) {
+        changes.push({ kind: 'styled', tag: cur.tagName.toLowerCase(), text: newText });
+      }
+    }
+    for (const [id, cur] of currentMap) {
+      if (!otherMap.has(id)) {
+        changes.push({ kind: 'added', tag: cur.tagName.toLowerCase(), newText: (cur.textContent || '').trim() });
+      }
+    }
+    return changes;
+  }
+
+  function formatTime(ts) {
+    const d = new Date(ts);
+    const today = new Date();
+    const sameDay = d.toDateString() === today.toDateString();
+    return sameDay ? 'Today ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                   : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+  }
+
+  function openVersionsModal() {
+    if (!state.doc) return;
+    versionsModal.hidden = false;
+    versionNameInput.value = '';
+    renderVersionsList();
+  }
+  function closeVersionsModal() {
+    versionsModal.hidden = true;
+  }
+
+  function renderVersionsList() {
+    const versions = loadVersions().filter(v => v.filename === state.filename);
+    versionsList.innerHTML = '';
+    if (!versions.length) {
+      const p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'No saved versions yet for ' + state.filename + '. Save your first one above.';
+      versionsList.appendChild(p);
+      return;
+    }
+    versions.forEach(v => versionsList.appendChild(renderVersionItem(v)));
+  }
+
+  function renderVersionItem(v) {
+    const item = document.createElement('div');
+    item.className = 'version-item';
+
+    const header = document.createElement('div');
+    header.className = 'v-header';
+    const name = document.createElement('div');
+    name.className = 'v-name';
+    name.textContent = v.name;
+    const meta = document.createElement('div');
+    meta.className = 'v-meta';
+    meta.textContent = formatTime(v.timestamp);
+    header.appendChild(name);
+    header.appendChild(meta);
+    item.appendChild(header);
+
+    const actions = document.createElement('div');
+    actions.className = 'v-actions';
+    const restoreBtn = document.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.textContent = 'Restore';
+    restoreBtn.addEventListener('click', () => restoreVersion(v.id));
+    const compareBtn = document.createElement('button');
+    compareBtn.type = 'button';
+    compareBtn.className = 'secondary';
+    compareBtn.textContent = 'See changes';
+    let changesShown = false;
+    compareBtn.addEventListener('click', () => {
+      const existing = item.querySelector('.version-changes');
+      if (existing) { existing.remove(); changesShown = false; compareBtn.textContent = 'See changes'; return; }
+      const changes = compareToVersion(v.html);
+      item.appendChild(renderChangeList(changes));
+      changesShown = true;
+      compareBtn.textContent = 'Hide changes';
+    });
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'danger';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => {
+      if (!confirm('Delete the version "' + v.name + '"? This cannot be undone.')) return;
+      deleteVersion(v.id);
+      renderVersionsList();
+    });
+    actions.appendChild(restoreBtn);
+    actions.appendChild(compareBtn);
+    actions.appendChild(deleteBtn);
+    item.appendChild(actions);
+
+    return item;
+  }
+
+  function renderChangeList(changes) {
+    const wrap = document.createElement('div');
+    wrap.className = 'version-changes';
+    if (!changes.length) {
+      const p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'No differences — current state matches this version.';
+      wrap.appendChild(p);
+      return wrap;
+    }
+    changes.slice(0, 100).forEach(c => wrap.appendChild(renderChangeEntry(c)));
+    if (changes.length > 100) {
+      const more = document.createElement('p');
+      more.className = 'empty';
+      more.style.marginTop = '8px';
+      more.textContent = '… and ' + (changes.length - 100) + ' more changes.';
+      wrap.appendChild(more);
+    }
+    return wrap;
+  }
+
+  function renderChangeEntry(c) {
+    const row = document.createElement('div');
+    row.className = 'change-entry';
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + c.kind;
+    badge.textContent = c.kind;
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = '<' + c.tag + '>';
+    row.appendChild(badge);
+    row.appendChild(tag);
+    if (c.kind === 'changed') {
+      const oldEl = document.createElement('span');
+      oldEl.className = 'text-old';
+      oldEl.textContent = c.oldText || '(empty)';
+      const newEl = document.createElement('span');
+      newEl.className = 'text-new';
+      newEl.textContent = c.newText || '(empty)';
+      row.appendChild(oldEl);
+      row.appendChild(newEl);
+    } else if (c.kind === 'added') {
+      const newEl = document.createElement('span');
+      newEl.className = 'text-new';
+      newEl.textContent = c.newText || '(empty)';
+      row.appendChild(newEl);
+    } else if (c.kind === 'removed') {
+      const oldEl = document.createElement('span');
+      oldEl.className = 'text-old';
+      oldEl.textContent = c.oldText || '(empty)';
+      row.appendChild(oldEl);
+    } else if (c.kind === 'styled') {
+      const note = document.createElement('span');
+      note.style.display = 'block';
+      note.style.color = '#6b7280';
+      note.style.marginTop = '2px';
+      note.style.paddingLeft = '8px';
+      note.textContent = 'attribute/style change on ' + (c.text ? '"' + c.text.slice(0, 60) + '"' : 'element');
+      row.appendChild(note);
+    }
+    return row;
+  }
+
+  versionsBtn.addEventListener('click', openVersionsModal);
+  document.getElementById('save-version-btn').addEventListener('click', () => {
+    snapshotCurrent(versionNameInput.value);
+    versionNameInput.value = '';
+    renderVersionsList();
+  });
+  versionsModal.querySelector('.modal-close').addEventListener('click', closeVersionsModal);
+  versionsModal.querySelector('.modal-backdrop').addEventListener('click', closeVersionsModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !versionsModal.hidden) closeVersionsModal();
+  });
 
   // ===== Download =====
   downloadBtn.addEventListener('click', () => {
