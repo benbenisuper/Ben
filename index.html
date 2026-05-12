@@ -69,8 +69,17 @@
     padding: 2px 8px; border-radius: 4px; font-family: ui-monospace, monospace;
     font-size: 12px; font-weight: 600;
   }
-  .selected-info { padding: 10px; background: #f9fafb; border-radius: 6px; margin-bottom: 16px; font-size: 13px; }
+  .selected-info { padding: 10px; background: #f9fafb; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
   .selected-info .path { color: #6b7280; font-size: 11px; font-family: ui-monospace, monospace; margin-top: 4px; word-break: break-all; }
+  .nav-row { display: flex; gap: 6px; margin-bottom: 14px; }
+  .nav-btn { flex: 1; padding: 6px 8px; font-size: 12px; }
+  .nav-btn:disabled { background: #e5e7eb; color: #9ca3af; }
+  .child-picker { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px; margin: -6px 0 14px; max-height: 200px; overflow-y: auto; }
+  .child-pick-item { display: block; width: 100%; text-align: left; background: white; color: #1f2937; border: 1px solid transparent; padding: 6px 8px; margin-bottom: 2px; border-radius: 4px; font-weight: 400; font-size: 12px; }
+  .child-pick-item:hover { background: #eff6ff; border-color: #bfdbfe; }
+  .child-pick-item:last-child { margin-bottom: 0; }
+  .child-pick-item .preview { color: #6b7280; margin-left: 6px; }
+  .warn { background: #fef3c7; border: 1px solid #fcd34d; color: #78350f; padding: 8px 10px; border-radius: 4px; font-size: 12px; line-height: 1.4; margin: -6px 0 14px; }
   hr { border: none; border-top: 1px solid #e5e7eb; margin: 16px 0; }
 </style>
 </head>
@@ -253,19 +262,18 @@
     sidebar.innerHTML = '';
     sidebar.appendChild(info);
 
-    // Text content (only when no nested elements, to avoid wiping structure)
-    if (!hasChildElements) {
-      addTextField(sidebar, 'Text', docEl.textContent || '', (v) => {
-        applyToBoth((el) => { el.textContent = v; });
-      });
-    } else {
-      const note = document.createElement('p');
-      note.className = 'empty';
-      note.style.fontSize = '12px';
-      note.style.marginTop = '0';
-      note.style.marginBottom = '14px';
-      note.textContent = 'This element contains other elements. Click a child to edit its text directly.';
-      sidebar.appendChild(note);
+    // Navigation: parent + children buttons (helpful when click can't reach an element)
+    addNavigation(sidebar, docEl);
+
+    // Text content — always editable. Warn if it'd replace nested elements.
+    addTextField(sidebar, 'Text', docEl.textContent || '', (v) => {
+      applyToBoth((el) => { el.textContent = v; });
+    });
+    if (hasChildElements) {
+      const warn = document.createElement('p');
+      warn.className = 'warn';
+      warn.textContent = 'Typing here replaces the nested elements inside with plain text. To keep them, use the Parent / Child buttons above to pick a specific element.';
+      sidebar.appendChild(warn);
     }
 
     // Image src
@@ -354,6 +362,69 @@
     input.addEventListener('input', () => onChange(input.value));
     wrap.appendChild(input);
     parent.appendChild(wrap);
+  }
+
+  function addNavigation(parent, docEl) {
+    const wrap = document.createElement('div');
+    wrap.className = 'nav-row';
+
+    const parentEl = docEl.parentElement;
+    const parentBtn = document.createElement('button');
+    parentBtn.type = 'button';
+    parentBtn.className = 'secondary nav-btn';
+    parentBtn.textContent = '↑ Parent';
+    parentBtn.disabled = !parentEl || !parentEl.hasAttribute('data-editor-id');
+    parentBtn.addEventListener('click', () => {
+      if (parentEl) selectById(parentEl.getAttribute('data-editor-id'));
+    });
+    wrap.appendChild(parentBtn);
+
+    const children = Array.from(docEl.children).filter(c => c.hasAttribute('data-editor-id'));
+    const childBtn = document.createElement('button');
+    childBtn.type = 'button';
+    childBtn.className = 'secondary nav-btn';
+    childBtn.textContent = children.length ? '↓ Child (' + children.length + ')' : '↓ No children';
+    childBtn.disabled = children.length === 0;
+    childBtn.addEventListener('click', () => {
+      if (children.length === 1) {
+        selectById(children[0].getAttribute('data-editor-id'));
+        return;
+      }
+      showChildPicker(wrap, children);
+    });
+    wrap.appendChild(childBtn);
+
+    parent.appendChild(wrap);
+  }
+
+  function showChildPicker(anchor, children) {
+    const existing = anchor.parentElement.querySelector('.child-picker');
+    if (existing) { existing.remove(); return; }
+    const list = document.createElement('div');
+    list.className = 'child-picker';
+    children.forEach((c, i) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'child-pick-item';
+      const tag = c.tagName.toLowerCase();
+      const preview = (c.textContent || '').trim().slice(0, 40);
+      item.innerHTML = '<span class="tag">&lt;' + tag + '&gt;</span> ' +
+        (preview ? '<span class="preview">' + escapeHtml(preview) + '</span>' : '<span class="preview">(empty)</span>');
+      item.addEventListener('click', () => selectById(c.getAttribute('data-editor-id')));
+      list.appendChild(item);
+    });
+    anchor.parentElement.insertBefore(list, anchor.nextSibling);
+  }
+
+  function selectById(id) {
+    if (!id) return;
+    state.selectedId = id;
+    highlightSelected();
+    renderSidebar();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
   }
 
   function addColorField(parent, label, value, onChange, onClear) {
