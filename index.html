@@ -106,15 +106,29 @@
   .version-item .v-actions button { padding: 4px 10px; font-size: 12px; }
   .version-changes { margin-top: 10px; padding: 10px; background: white; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 12px; max-height: 260px; overflow-y: auto; }
   .version-changes .empty { color: #6b7280; text-align: left; padding: 0; }
-  .change-entry { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
+  .change-entry { padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
   .change-entry:last-child { border-bottom: none; }
-  .change-entry .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; margin-right: 6px; vertical-align: middle; }
+  .change-entry .change-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .change-entry .badge { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
   .change-entry .badge.added { background: #d1fae5; color: #065f46; }
   .change-entry .badge.removed { background: #fee2e2; color: #991b1b; }
   .change-entry .badge.changed { background: #fef3c7; color: #92400e; }
   .change-entry .badge.styled { background: #dbeafe; color: #1e40af; }
-  .change-entry .text-old { display: block; color: #991b1b; text-decoration: line-through; margin-top: 4px; padding-left: 8px; border-left: 2px solid #fecaca; }
-  .change-entry .text-new { display: block; color: #065f46; margin-top: 2px; padding-left: 8px; border-left: 2px solid #a7f3d0; }
+  .change-entry .text-diff { font-size: 13px; line-height: 1.55; color: #374151; padding: 8px 10px; background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 6px; word-wrap: break-word; white-space: pre-wrap; }
+  .change-entry .text-diff.empty { color: #9ca3af; font-style: italic; }
+  .change-entry .text-diff.whole-add { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+  .change-entry .text-diff.whole-remove { background: #fef2f2; border-color: #fecaca; color: #991b1b; text-decoration: line-through; }
+  .diff-same { color: #6b7280; }
+  .diff-add { background: #bbf7d0; color: #064e3b; border-radius: 3px; padding: 0 2px; font-weight: 500; }
+  .diff-remove { background: #fecaca; color: #7f1d1d; text-decoration: line-through; border-radius: 3px; padding: 0 2px; }
+  .diff-ellipsis { color: #9ca3af; }
+  .style-context { font-size: 12px; color: #6b7280; font-style: italic; margin-bottom: 6px; }
+  .style-diff-list { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .style-diff { padding: 6px 10px; background: #f9fafb; border: 1px solid #f3f4f6; border-radius: 4px; word-break: break-all; }
+  .style-diff .key { color: #1f2937; font-family: ui-monospace, monospace; font-weight: 600; }
+  .style-diff .arrow { color: #9ca3af; margin: 0 6px; }
+  .style-diff .old-val { color: #991b1b; text-decoration: line-through; }
+  .style-diff .new-val { color: #065f46; }
 </style>
 </head>
 <body>
@@ -731,25 +745,118 @@
     for (const [id, otherEl] of otherMap) {
       const cur = currentMap.get(id);
       if (!cur) {
-        changes.push({ kind: 'removed', tag: otherEl.tagName.toLowerCase(), oldText: (otherEl.textContent || '').trim() });
+        changes.push({ kind: 'removed', id, tag: otherEl.tagName.toLowerCase(), oldText: getEditableText(otherEl) });
         continue;
       }
-      const oldText = (otherEl.textContent || '').trim();
-      const newText = (cur.textContent || '').trim();
+      const oldText = getEditableText(otherEl);
+      const newText = getEditableText(cur);
       if (oldText !== newText) {
-        changes.push({ kind: 'changed', tag: cur.tagName.toLowerCase(), oldText, newText });
-      } else if ((otherEl.getAttribute('style') || '') !== (cur.getAttribute('style') || '') ||
-                 (otherEl.getAttribute('src') || '') !== (cur.getAttribute('src') || '') ||
-                 (otherEl.getAttribute('href') || '') !== (cur.getAttribute('href') || '')) {
-        changes.push({ kind: 'styled', tag: cur.tagName.toLowerCase(), text: newText });
+        changes.push({ kind: 'changed', id, tag: cur.tagName.toLowerCase(), oldText, newText, currentEl: cur });
+        continue;
+      }
+      // No text change — check for attribute/style changes.
+      const attrDiffs = [];
+      const oldStyle = parseStyleAttr(otherEl.getAttribute('style') || '');
+      const newStyle = parseStyleAttr(cur.getAttribute('style') || '');
+      const styleKeys = new Set([...Object.keys(oldStyle), ...Object.keys(newStyle)]);
+      styleKeys.forEach(k => {
+        if (oldStyle[k] !== newStyle[k]) attrDiffs.push({ key: k, oldV: oldStyle[k] || '', newV: newStyle[k] || '' });
+      });
+      ['src', 'href', 'alt'].forEach(a => {
+        const o = otherEl.getAttribute(a) || '';
+        const n = cur.getAttribute(a) || '';
+        if (o !== n) attrDiffs.push({ key: a, oldV: o, newV: n });
+      });
+      if (attrDiffs.length) {
+        changes.push({ kind: 'styled', id, tag: cur.tagName.toLowerCase(), text: newText, attrDiffs, currentEl: cur });
       }
     }
     for (const [id, cur] of currentMap) {
       if (!otherMap.has(id)) {
-        changes.push({ kind: 'added', tag: cur.tagName.toLowerCase(), newText: (cur.textContent || '').trim() });
+        changes.push({ kind: 'added', id, tag: cur.tagName.toLowerCase(), newText: getEditableText(cur), currentEl: cur });
       }
     }
-    return changes;
+    return filterDeepestChanges(changes);
+  }
+
+  function parseStyleAttr(s) {
+    const out = {};
+    s.split(';').forEach(rule => {
+      const i = rule.indexOf(':');
+      if (i < 0) return;
+      const k = rule.slice(0, i).trim();
+      const v = rule.slice(i + 1).trim();
+      if (k) out[k] = v;
+    });
+    return out;
+  }
+
+  // Drop ancestors whose text change is purely a reflection of a descendant text change we already report.
+  function filterDeepestChanges(changes) {
+    const changedIds = new Set(changes.filter(c => c.kind === 'changed').map(c => c.id));
+    return changes.filter(c => {
+      if (c.kind !== 'changed' || !c.currentEl) return true;
+      const descendants = c.currentEl.querySelectorAll('[data-editor-id]');
+      for (const d of descendants) {
+        const did = d.getAttribute('data-editor-id');
+        if (did !== c.id && changedIds.has(did)) return false;
+      }
+      return true;
+    });
+  }
+
+  // ===== Word-level diff (LCS over tokens) =====
+  function tokenize(s) {
+    return String(s).match(/\s+|[^\s]+/g) || [];
+  }
+
+  function diffTokens(a, b) {
+    const m = a.length, n = b.length;
+    const dp = [];
+    for (let i = 0; i <= m; i++) dp.push(new Int32Array(n + 1));
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) {
+        if (a[i] === b[j]) dp[i][j] = dp[i + 1][j + 1] + 1;
+        else dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    const out = [];
+    let i = 0, j = 0;
+    while (i < m && j < n) {
+      if (a[i] === b[j]) { out.push({ t: 'same', v: a[i] }); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ t: 'remove', v: a[i] }); i++; }
+      else { out.push({ t: 'add', v: b[j] }); j++; }
+    }
+    while (i < m) out.push({ t: 'remove', v: a[i++] });
+    while (j < n) out.push({ t: 'add', v: b[j++] });
+    return mergeAdjacent(out);
+  }
+
+  function mergeAdjacent(tokens) {
+    const out = [];
+    tokens.forEach(tok => {
+      const last = out[out.length - 1];
+      if (last && last.t === tok.t) last.v += tok.v;
+      else out.push({ t: tok.t, v: tok.v });
+    });
+    return out;
+  }
+
+  // Shrink long unchanged stretches to keep the diff scannable.
+  function compactContext(tokens, contextChars = 60) {
+    const result = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i];
+      const prev = tokens[i - 1];
+      const next = tokens[i + 1];
+      if (tok.t !== 'same' || tok.v.length <= contextChars * 2) { result.push(tok); continue; }
+      const leadCut = prev ? tok.v.slice(0, contextChars) : '';
+      const tailCut = next ? tok.v.slice(-contextChars) : '';
+      if (prev) result.push({ t: 'same', v: leadCut });
+      result.push({ t: 'ellipsis', v: ' … ' });
+      if (next) result.push({ t: 'same', v: tailCut });
+    }
+    return result;
   }
 
   function formatTime(ts) {
@@ -859,43 +966,87 @@
   function renderChangeEntry(c) {
     const row = document.createElement('div');
     row.className = 'change-entry';
+
+    const head = document.createElement('div');
+    head.className = 'change-head';
     const badge = document.createElement('span');
     badge.className = 'badge ' + c.kind;
-    badge.textContent = c.kind;
+    badge.textContent = c.kind === 'styled' ? 'style' : c.kind;
     const tag = document.createElement('span');
     tag.className = 'tag';
     tag.textContent = '<' + c.tag + '>';
-    row.appendChild(badge);
-    row.appendChild(tag);
+    head.appendChild(badge);
+    head.appendChild(tag);
+    row.appendChild(head);
+
     if (c.kind === 'changed') {
-      const oldEl = document.createElement('span');
-      oldEl.className = 'text-old';
-      oldEl.textContent = c.oldText || '(empty)';
-      const newEl = document.createElement('span');
-      newEl.className = 'text-new';
-      newEl.textContent = c.newText || '(empty)';
-      row.appendChild(oldEl);
-      row.appendChild(newEl);
-    } else if (c.kind === 'added') {
-      const newEl = document.createElement('span');
-      newEl.className = 'text-new';
-      newEl.textContent = c.newText || '(empty)';
-      row.appendChild(newEl);
-    } else if (c.kind === 'removed') {
-      const oldEl = document.createElement('span');
-      oldEl.className = 'text-old';
-      oldEl.textContent = c.oldText || '(empty)';
-      row.appendChild(oldEl);
+      row.appendChild(renderInlineDiff(c.oldText, c.newText));
+    } else if (c.kind === 'added' || c.kind === 'removed') {
+      const block = document.createElement('div');
+      block.className = 'text-diff ' + (c.kind === 'added' ? 'whole-add' : 'whole-remove');
+      block.textContent = (c.kind === 'added' ? c.newText : c.oldText) || '(empty)';
+      row.appendChild(block);
     } else if (c.kind === 'styled') {
-      const note = document.createElement('span');
-      note.style.display = 'block';
-      note.style.color = '#6b7280';
-      note.style.marginTop = '2px';
-      note.style.paddingLeft = '8px';
-      note.textContent = 'attribute/style change on ' + (c.text ? '"' + c.text.slice(0, 60) + '"' : 'element');
-      row.appendChild(note);
+      if (c.text) {
+        const ctx = document.createElement('div');
+        ctx.className = 'style-context';
+        ctx.textContent = '"' + c.text.slice(0, 80) + (c.text.length > 80 ? '…' : '') + '"';
+        row.appendChild(ctx);
+      }
+      const list = document.createElement('div');
+      list.className = 'style-diff-list';
+      c.attrDiffs.forEach(d => {
+        const line = document.createElement('div');
+        line.className = 'style-diff';
+        const key = document.createElement('span');
+        key.className = 'key';
+        key.textContent = d.key;
+        line.appendChild(key);
+        line.appendChild(document.createTextNode(': '));
+        if (d.oldV) {
+          const oldV = document.createElement('span');
+          oldV.className = 'old-val';
+          oldV.textContent = d.oldV;
+          line.appendChild(oldV);
+          const arrow = document.createElement('span');
+          arrow.className = 'arrow';
+          arrow.textContent = '→';
+          line.appendChild(arrow);
+        }
+        if (d.newV) {
+          const newV = document.createElement('span');
+          newV.className = 'new-val';
+          newV.textContent = d.newV;
+          line.appendChild(newV);
+        } else if (d.oldV) {
+          const empty = document.createElement('span');
+          empty.className = 'arrow';
+          empty.textContent = '(removed)';
+          line.appendChild(empty);
+        }
+        list.appendChild(line);
+      });
+      row.appendChild(list);
     }
     return row;
+  }
+
+  function renderInlineDiff(oldText, newText) {
+    const wrap = document.createElement('div');
+    wrap.className = 'text-diff';
+    const tokens = compactContext(diffTokens(tokenize(oldText), tokenize(newText)));
+    if (!tokens.length) {
+      wrap.textContent = '(no visible change)';
+      wrap.classList.add('empty');
+      return wrap;
+    }
+    tokens.forEach(tok => {
+      const s = document.createElement('span');
+      s.className = 'diff-' + tok.t;
+      s.textContent = tok.v;
+      wrap.appendChild(s);
+    });
+    return wrap;
   }
 
   versionsBtn.addEventListener('click', openVersionsModal);
