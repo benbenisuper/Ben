@@ -129,6 +129,49 @@
   .style-diff .arrow { color: #9ca3af; margin: 0 6px; }
   .style-diff .old-val { color: #991b1b; text-decoration: line-through; }
   .style-diff .new-val { color: #065f46; }
+
+  /* Share modal */
+  .share-help { margin: 0 0 12px; font-size: 13px; color: #4b5563; line-height: 1.4; }
+  .share-url-row { display: flex; gap: 8px; }
+  .share-url-row input { flex: 1; padding: 9px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; font-family: ui-monospace, monospace; min-width: 0; }
+  .share-url-row button { white-space: nowrap; }
+  .share-native-btn { margin-top: 10px; width: 100%; display: none; }
+  .share-error { margin-top: 10px; padding: 8px 10px; background: #fee2e2; color: #991b1b; border-radius: 4px; font-size: 12px; line-height: 1.4; }
+
+  /* Review mode */
+  body.review-mode > header,
+  body.review-mode > main,
+  body.review-mode > #versions-modal { display: none !important; }
+  body.review-mode > #review-container { display: flex; flex: 1; }
+  #review-container { flex-direction: column; height: 100%; overflow: hidden; }
+  .review-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #1f2937; color: #f9fafb; border-bottom: 1px solid #111827; flex: 0 0 auto; }
+  .review-header button { padding: 6px 12px; font-size: 12px; }
+  .review-title { flex: 1; min-width: 0; }
+  .review-title .review-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .review-title .review-meta { font-size: 11px; color: #9ca3af; }
+  .review-status { font-size: 11px; color: #9ca3af; flex: 0 0 auto; }
+  .review-page-wrap { flex: 1 1 auto; min-height: 0; padding: 12px; background: #e5e7eb; }
+  #review-page { width: 100%; height: 100%; background: white; border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
+  #review-page iframe { width: 100%; height: 100%; border: none; display: block; }
+  #review-page .review-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 14px; }
+  .review-comments-wrap { flex: 0 0 auto; max-height: 45vh; display: flex; flex-direction: column; background: white; border-top: 1px solid #e5e7eb; padding: 12px 16px; }
+  .review-comments-wrap h3 { margin: 0 0 10px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; }
+  #review-comments-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; }
+  #review-comments-list .empty { color: #9ca3af; font-size: 13px; text-align: center; padding: 16px 0; }
+  .comment-card { padding: 10px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; }
+  .comment-card .comment-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; flex-wrap: wrap; }
+  .comment-card .comment-author { font-weight: 600; color: #1f2937; font-size: 13px; }
+  .comment-card .comment-time { font-size: 11px; color: #6b7280; }
+  .comment-card .comment-text { font-size: 14px; color: #374151; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+  .review-comment-form { display: flex; flex-direction: column; gap: 8px; }
+  .review-comment-form input, .review-comment-form textarea { padding: 9px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; font-family: inherit; }
+  .review-comment-form textarea { min-height: 60px; resize: vertical; }
+  .review-form-row { display: flex; justify-content: flex-end; }
+  .review-form-row button { padding: 9px 16px; }
+  @media (max-width: 640px) {
+    .review-page-wrap { padding: 8px; }
+    .review-comments-wrap { max-height: 55vh; padding: 10px 12px; }
+  }
 </style>
 </head>
 <body>
@@ -142,6 +185,50 @@
   <span class="spacer"></span>
   <span class="filename" id="filename-label">No file loaded</span>
 </header>
+
+<div id="review-container" hidden>
+  <header class="review-header">
+    <button id="review-back-btn" class="secondary" type="button">Open editor</button>
+    <div class="review-title">
+      <div class="review-name" id="review-name"></div>
+      <div class="review-meta" id="review-meta"></div>
+    </div>
+    <div id="review-status" class="review-status"></div>
+  </header>
+  <div class="review-page-wrap">
+    <div id="review-page"><div class="review-empty">Loading…</div></div>
+  </div>
+  <div class="review-comments-wrap">
+    <h3>Comments</h3>
+    <div id="review-comments-list"></div>
+    <form id="review-comment-form" class="review-comment-form">
+      <input type="text" id="review-author" placeholder="Your name" required maxlength="40" autocomplete="name">
+      <textarea id="review-text" placeholder="Leave a comment…" required maxlength="2000"></textarea>
+      <div class="review-form-row">
+        <button type="submit">Post comment</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="share-modal" class="modal" hidden>
+  <div class="modal-backdrop"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Share for comments</h2>
+      <button class="modal-close" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="share-help">Anyone with this link can view the version and leave comments. Comments stay live for at least 30 days.</p>
+      <div class="share-url-row">
+        <input type="text" id="share-url-input" readonly>
+        <button type="button" id="share-copy-btn">Copy</button>
+      </div>
+      <button type="button" id="share-native-btn" class="secondary share-native-btn">Share via…</button>
+      <div id="share-error" class="share-error" hidden></div>
+    </div>
+  </div>
+</div>
 
 <div id="versions-modal" class="modal" hidden>
   <div class="modal-backdrop"></div>
@@ -925,6 +1012,11 @@
       changesShown = true;
       compareBtn.textContent = 'Hide changes';
     });
+    const shareBtn = document.createElement('button');
+    shareBtn.type = 'button';
+    shareBtn.className = 'secondary';
+    shareBtn.textContent = 'Share for comments';
+    shareBtn.addEventListener('click', () => shareVersion(v));
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'danger';
@@ -936,6 +1028,7 @@
     });
     actions.appendChild(restoreBtn);
     actions.appendChild(compareBtn);
+    actions.appendChild(shareBtn);
     actions.appendChild(deleteBtn);
     item.appendChild(actions);
 
@@ -1082,6 +1175,273 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
+
+  // ===== Sharing for comments (jsonblob.com — free, anonymous, ~30 day retention) =====
+  const SHARE_API = 'https://jsonblob.com/api/jsonBlob';
+  const shareModal = document.getElementById('share-modal');
+  const shareUrlInput = document.getElementById('share-url-input');
+  const shareCopyBtn = document.getElementById('share-copy-btn');
+  const shareNativeBtn = document.getElementById('share-native-btn');
+  const shareError = document.getElementById('share-error');
+
+  async function shareVersion(v) {
+    openShareModal();
+    setShareState({ loading: true });
+    try {
+      const payload = {
+        filename: v.filename,
+        name: v.name,
+        html: v.html,
+        createdAt: Date.now(),
+        comments: [],
+      };
+      const resp = await fetch(SHARE_API, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error('Storage server returned ' + resp.status);
+      const location = resp.headers.get('Location') || '';
+      const m = location.match(/\/([^/?#]+)\/?$/);
+      const blobId = m ? m[1] : null;
+      if (!blobId) throw new Error('Could not parse blob ID from response');
+      const url = new URL(window.location.href);
+      url.search = '?review=' + encodeURIComponent(blobId);
+      url.hash = '';
+      setShareState({ url: url.toString() });
+    } catch (e) {
+      setShareState({ error: 'Could not create share link. ' + (e.message || '') });
+    }
+  }
+
+  function openShareModal() { shareModal.hidden = false; }
+  function closeShareModal() { shareModal.hidden = true; }
+
+  function setShareState({ loading, url, error }) {
+    if (loading) {
+      shareUrlInput.value = 'Generating link…';
+      shareUrlInput.disabled = true;
+      shareCopyBtn.disabled = true;
+      shareNativeBtn.style.display = 'none';
+      shareError.hidden = true;
+    } else if (error) {
+      shareUrlInput.value = '';
+      shareUrlInput.disabled = true;
+      shareCopyBtn.disabled = true;
+      shareError.hidden = false;
+      shareError.textContent = error;
+      shareNativeBtn.style.display = 'none';
+    } else if (url) {
+      shareUrlInput.value = url;
+      shareUrlInput.disabled = false;
+      shareCopyBtn.disabled = false;
+      shareError.hidden = true;
+      shareNativeBtn.style.display = navigator.share ? 'block' : 'none';
+      shareNativeBtn.dataset.shareUrl = url;
+    }
+  }
+
+  shareCopyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrlInput.value);
+      const orig = shareCopyBtn.textContent;
+      shareCopyBtn.textContent = 'Copied!';
+      setTimeout(() => shareCopyBtn.textContent = orig, 1500);
+    } catch {
+      shareUrlInput.select();
+      try { document.execCommand('copy'); } catch {}
+    }
+  });
+  shareNativeBtn.addEventListener('click', () => {
+    const url = shareNativeBtn.dataset.shareUrl;
+    if (!url || !navigator.share) return;
+    navigator.share({ title: 'Review this version', url }).catch(() => {});
+  });
+  shareModal.querySelector('.modal-close').addEventListener('click', closeShareModal);
+  shareModal.querySelector('.modal-backdrop').addEventListener('click', closeShareModal);
+
+})();
+
+// ===== Review mode bootstrap =====
+// Runs separately from the editor IIFE so the editor stays inert when ?review=<id> is present.
+(() => {
+  const params = new URLSearchParams(window.location.search);
+  const reviewId = params.get('review');
+  if (!reviewId) return;
+
+  document.body.classList.add('review-mode');
+  const container = document.getElementById('review-container');
+  container.hidden = false;
+
+  const SHARE_API = 'https://jsonblob.com/api/jsonBlob';
+  const REVIEWER_NAME_KEY = 'html-editor-reviewer-name';
+  const POLL_MS = 6000;
+
+  const nameEl = document.getElementById('review-name');
+  const metaEl = document.getElementById('review-meta');
+  const statusEl = document.getElementById('review-status');
+  const pageEl = document.getElementById('review-page');
+  const listEl = document.getElementById('review-comments-list');
+  const form = document.getElementById('review-comment-form');
+  const authorInput = document.getElementById('review-author');
+  const textInput = document.getElementById('review-text');
+  const backBtn = document.getElementById('review-back-btn');
+
+  let cached = null;
+  let pollTimer = null;
+  let pageRendered = false;
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text || '';
+    statusEl.style.color = isError ? '#fca5a5' : '#9ca3af';
+  }
+
+  function formatTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const today = new Date();
+    return d.toDateString() === today.toDateString()
+      ? 'Today ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+  }
+
+  async function fetchBlob() {
+    const resp = await fetch(SHARE_API + '/' + reviewId, { headers: { 'Accept': 'application/json' } });
+    if (!resp.ok) throw new Error('Server returned ' + resp.status);
+    return await resp.json();
+  }
+
+  async function putBlob(data) {
+    const resp = await fetch(SHARE_API + '/' + reviewId, {
+      method: 'PUT',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!resp.ok) throw new Error('Server returned ' + resp.status);
+  }
+
+  function renderPage(data) {
+    if (pageRendered) return;
+    pageRendered = true;
+    nameEl.textContent = (data.filename || 'Untitled') + (data.name ? ' · ' + data.name : '');
+    metaEl.textContent = data.createdAt ? 'Shared ' + formatTime(data.createdAt) : '';
+    let html = data.html || '<!DOCTYPE html><html><body>(no content)</body></html>';
+    try {
+      const d = new DOMParser().parseFromString(html, 'text/html');
+      d.querySelectorAll('[data-editor-id]').forEach(el => el.removeAttribute('data-editor-id'));
+      d.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+      d.querySelectorAll('[data-editor-selected]').forEach(el => el.removeAttribute('data-editor-selected'));
+      d.querySelectorAll('[data-editor-hover]').forEach(el => el.removeAttribute('data-editor-hover'));
+      d.querySelectorAll('[data-editor-injected]').forEach(el => el.remove());
+      html = '<!DOCTYPE html>\n' + d.documentElement.outerHTML;
+    } catch {}
+    pageEl.innerHTML = '';
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('sandbox', 'allow-same-origin');
+    iframe.srcdoc = html;
+    pageEl.appendChild(iframe);
+  }
+
+  function renderComments(comments) {
+    const wasAtBottom = listEl.scrollTop + listEl.clientHeight >= listEl.scrollHeight - 4;
+    listEl.innerHTML = '';
+    if (!comments || !comments.length) {
+      const p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'No comments yet. Be the first.';
+      listEl.appendChild(p);
+      return;
+    }
+    comments.forEach(c => {
+      const card = document.createElement('div');
+      card.className = 'comment-card';
+      const head = document.createElement('div');
+      head.className = 'comment-head';
+      const author = document.createElement('span');
+      author.className = 'comment-author';
+      author.textContent = c.author || 'Anonymous';
+      const time = document.createElement('span');
+      time.className = 'comment-time';
+      time.textContent = formatTime(c.ts);
+      head.appendChild(author);
+      head.appendChild(time);
+      const text = document.createElement('div');
+      text.className = 'comment-text';
+      text.textContent = c.text || '';
+      card.appendChild(head);
+      card.appendChild(text);
+      listEl.appendChild(card);
+    });
+    if (wasAtBottom) listEl.scrollTop = listEl.scrollHeight;
+  }
+
+  async function load() {
+    try {
+      const data = await fetchBlob();
+      cached = data;
+      renderPage(data);
+      renderComments(data.comments || []);
+      setStatus('');
+    } catch (e) {
+      setStatus('Could not load: ' + (e.message || 'error'), true);
+      pageEl.innerHTML = '<div class="review-empty">Couldn’t load this version. The link may have expired or the storage service is down.</div>';
+    }
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+      try {
+        const data = await fetchBlob();
+        cached = data;
+        renderComments(data.comments || []);
+      } catch { /* transient network issues — ignore */ }
+    }, POLL_MS);
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const author = authorInput.value.trim();
+    const text = textInput.value.trim();
+    if (!author || !text) return;
+    try { localStorage.setItem(REVIEWER_NAME_KEY, author); } catch {}
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    const orig = submitBtn.textContent;
+    submitBtn.textContent = 'Posting…';
+    try {
+      if (!cached) cached = await fetchBlob();
+      cached.comments = cached.comments || [];
+      cached.comments.push({
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        author,
+        text,
+        ts: Date.now(),
+      });
+      await putBlob(cached);
+      renderComments(cached.comments);
+      textInput.value = '';
+    } catch (err) {
+      alert('Could not post comment: ' + (err.message || 'error'));
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = orig;
+    }
+  });
+
+  backBtn.addEventListener('click', () => {
+    const url = new URL(window.location.href);
+    url.search = '';
+    window.location.href = url.toString();
+  });
+
+  try {
+    const savedName = localStorage.getItem(REVIEWER_NAME_KEY);
+    if (savedName) authorInput.value = savedName;
+  } catch {}
+
+  setStatus('Loading…');
+  load().then(startPolling);
 })();
 </script>
 </body>
