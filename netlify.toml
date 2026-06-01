@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+
+# Serve the LGM Workspace at the site root while keeping index.html (editor) intact.
+[[redirects]]
+  from = "/"
+  to = "/lgm.html"
+  status = 200
+  force = true
